@@ -868,7 +868,7 @@ function renderSchools() {
     const lvlBadge = `<span class="badge badge-${t.level.toLowerCase()}">${t.level}</span>`;
     return `<tr>
       <td>${lvlBadge}</td>
-      <td>Div ${escHtml(t.div)}</td>
+      <td style="white-space:nowrap;min-width:52px">Div ${escHtml(t.div)}</td>
       <td style="font-weight:500">${escHtml(t.team)}</td>
       <td>${zonePill(t.zone)}</td>
     </tr>`;
