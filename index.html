@@ -528,12 +528,19 @@ function renderFieldTimeline() {
     weekGames.forEach(g => {
       const key   = g.field + '|' + (g.sub_field || '');
       const label = shortField(g.field) + (g.sub_field ? ' – ' + g.sub_field : '');
-      if (!rowMap.has(key)) rowMap.set(key, {label, games:[], perm_start:g.perm_start, perm_end:g.perm_end});
+      if (!rowMap.has(key)) rowMap.set(key, {label, games:[], permitWindows:[], _pwKeys: new Set()});
       const row = rowMap.get(key);
       row.games.push(g);
-      // Keep the widest permit window for this row (all games in a lane share the same window)
-      if (g.perm_start != null && (row.perm_start == null || g.perm_start < row.perm_start)) row.perm_start = g.perm_start;
-      if (g.perm_end   != null && (row.perm_end   == null || g.perm_end   > row.perm_end))   row.perm_end   = g.perm_end;
+      // Track each distinct permit window separately — never merge them.
+      // A field can have two separate permit windows (e.g. 9am-10:30am and 1pm-4pm);
+      // merging would paint the gap blue, making it look like a permit exists there.
+      if (g.perm_start != null && g.perm_end != null) {
+        const wkey = g.perm_start + '|' + g.perm_end;
+        if (!row._pwKeys.has(wkey)) {
+          row._pwKeys.add(wkey);
+          row.permitWindows.push({ps: g.perm_start, pe: g.perm_end});
+        }
+      }
     });
 
     // ── Add EMPTY permit rows (permits with no game at all this week) ─────────
@@ -555,17 +562,19 @@ function renderFieldTimeline() {
 
     const rowKeys = [...rowMap.keys()].sort();
     const rows = rowKeys.map(key => {
-      const {label, games:rGames, perm_start:ps, perm_end:pe, empty} = rowMap.get(key);
+      const {label, games:rGames, permitWindows, perm_start:ps, perm_end:pe, empty} = rowMap.get(key);
+      // _windows: use per-game permit windows for game rows, or fallback perm_start/perm_end for empty rows
+      const _windows = (permitWindows && permitWindows.length)
+        ? permitWindows
+        : (ps != null && pe != null ? [{ps, pe}] : []);
 
-      // Permit background bar
-      let permitBar = '';
-      if (ps != null && pe != null) {
-        const s2 = Math.max(ps, DAY_START), e2 = Math.min(pe, DAY_END);
-        if (s2 < e2) {
-          const cls = empty ? 'empty-permit-bar' : 'permit-bar';
-          permitBar = `<div class="${cls}" style="${toTimeStyle(s2, e2)}" title="Permit: ${fmt(ps)}–${fmt(pe)}"></div>`;
-        }
-      }
+      // Permit background bars — one per distinct permit window (no gap-filling between windows)
+      const permitBar = _windows.map(({ps:ws, pe:we}) => {
+        const s2 = Math.max(ws, DAY_START), e2 = Math.min(we, DAY_END);
+        if (s2 >= e2) return '';
+        const cls = empty ? 'empty-permit-bar' : 'permit-bar';
+        return `<div class="${cls}" style="${toTimeStyle(s2, e2)}" title="Permit: ${fmt(ws)}–${fmt(we)}"></div>`;
+      }).join('');
 
       // Game blocks
       const gameBlocks = rGames.map(g => {
@@ -584,18 +593,19 @@ function renderFieldTimeline() {
       if (empty) {
         const wmin = pe - ps;
         emptyMsg = `<div class="empty-permit-msg" style="left:${toTimeStyle(Math.max(ps,DAY_START),Math.min(pe,DAY_END)).split(';')[0]}">⚠ No games — consider dropping this permit (${wmin} min)</div>`;
-      } else if (rGames.length > 0 && ps != null) {
-        const lastEnd = Math.max(...rGames.filter(g => g.end_min).map(g => g.end_min));
-        const waste   = pe - lastEnd;
+      } else if (rGames.length > 0 && _windows.length > 0) {
+        const lastEnd    = Math.max(...rGames.filter(g => g.end_min).map(g => g.end_min));
+        const lastWinEnd = Math.max(..._windows.map(w => w.pe));
+        const waste      = lastWinEnd - lastEnd;
         if (waste >= 30 && lastEnd < DAY_END) {
           const wasteClass = waste >= 60 ? 'green' : 'amber';
           const wLabel     = waste >= 60
             ? `💰 ${waste}m unused — consider shortening`
             : `${waste}m unused`;
-          const ws2 = Math.max(lastEnd, DAY_START), we2 = Math.min(pe, DAY_END);
+          const ws2 = Math.max(lastEnd, DAY_START), we2 = Math.min(lastWinEnd, DAY_END);
           if (ws2 < we2) {
             wasteBar = `<div class="waste-bar ${wasteClass}" style="${toTimeStyle(ws2, we2)}"
-              title="Permit ends ${fmt(pe)} but last game ends ${fmt(lastEnd)} — ${waste} min unused. Consider shortening permit end to ${fmt(lastEnd + 15)}.">
+              title="Permit ends ${fmt(lastWinEnd)} but last game ends ${fmt(lastEnd)} — ${waste} min unused. Consider shortening permit end to ${fmt(lastEnd + 15)}.">
               <span class="waste-label ${wasteClass}">${wLabel}</span>
             </div>`;
           }
