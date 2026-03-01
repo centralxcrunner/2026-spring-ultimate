@@ -876,59 +876,75 @@ function renderFields() {
   // Count games per field
   const gameCounts = {};
   for (const g of S.games) {
-    if (g.field && g.field !== 'NO FIELD AVAILABLE') {
+    if (g.field && g.field !== 'NO FIELD AVAILABLE')
       gameCounts[g.field] = (gameCounts[g.field] || 0) + 1;
-    }
   }
 
-  // Group by complex (primary) — each complex card shows its fields + zone badge
-  const byCx = {};
-  for (const f of fields) {
-    (byCx[f.complex] = byCx[f.complex] || []).push(f);
-  }
-
-  // Determine zone for complex (majority vote)
+  // Determine zone for a complex (majority vote across its fields)
   function cxZone(flds) {
     const z = {};
     for (const f of flds) (z[f.zone||''] = (z[f.zone||''] || 0) + 1);
     return Object.entries(z).sort((a,b)=>b[1]-a[1])[0]?.[0] || '';
   }
 
-  // Sort complexes: zone order first, then alpha within zone
-  const cxList = Object.entries(byCx).sort(([a, af],[b, bf]) => {
-    const za = ZONE_ORDER.indexOf(cxZone(af)); const zb = ZONE_ORDER.indexOf(cxZone(bf));
-    if (za !== zb) return za - zb;
-    return a.localeCompare(b);
-  });
+  // Group fields by complex
+  const byCx = {};
+  for (const f of fields) (byCx[f.complex] = byCx[f.complex] || []).push(f);
 
-  const cards = cxList.map(([cx, flds]) => {
-    const zone = cxZone(flds);
+  // Group complexes by zone
+  const byZone = {};
+  for (const [cx, flds] of Object.entries(byCx)) {
+    const z = cxZone(flds);
+    (byZone[z] = byZone[z] || []).push({cx, flds});
+  }
+
+  // Render: one section per zone, complex cards inside each
+  let html = '';
+  for (const zone of ZONE_ORDER) {
+    const cxEntries = byZone[zone];
+    if (!cxEntries || !cxEntries.length) continue;
+
     const color = ZONE_COLOR[zone] || '#9ca3af';
-    const totalGames = flds.reduce((s, f) => s + (gameCounts[f.field] || 0), 0);
-    const fieldRows = flds.map(f => {
-      const gc = gameCounts[f.field] || 0;
-      return `<tr>
-        <td style="font-weight:500;font-size:12px">${escHtml(f.field)}</td>
-        <td style="text-align:right;color:var(--text-secondary);font-size:12px">${gc > 0 ? gc : '<span style="color:#d1d5db">—</span>'}</td>
-      </tr>`;
-    }).join('');
+    const label = ZONE_LABEL[zone] || zone || 'Other';
 
-    return `<div class="sc-section" style="--sc-color:${color}">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
-        <h3 class="sc-heading" style="margin-bottom:0">${escHtml(cx)}</h3>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
-          ${zonePill(zone)}
+    // Sort complexes alpha within zone
+    cxEntries.sort((a, b) => a.cx.localeCompare(b.cx));
+
+    const cxCards = cxEntries.map(({cx, flds}) => {
+      const totalGames = flds.reduce((s, f) => s + (gameCounts[f.field] || 0), 0);
+      const fieldRows = flds.map(f => {
+        const gc = gameCounts[f.field] || 0;
+        return `<tr>
+          <td style="font-size:12px;padding:5px 8px">${escHtml(f.field)}</td>
+          <td style="text-align:right;font-size:12px;padding:5px 8px;color:var(--text-secondary)">${gc > 0 ? gc : '<span style="color:#d1d5db">—</span>'}</td>
+        </tr>`;
+      }).join('');
+
+      return `<div style="background:#fff;border-radius:6px;border:1px solid var(--border);overflow:hidden">
+        <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;font-size:13px">${escHtml(cx)}</span>
           <span style="font-size:11px;color:var(--text-secondary)">${totalGames} game${totalGames!==1?'s':''}</span>
         </div>
-      </div>
-      <table class="sc-table">
-        <thead><tr><th>Field / Sub-area</th><th style="text-align:right">Games</th></tr></thead>
-        <tbody>${fieldRows}</tbody>
-      </table>
-    </div>`;
-  }).join('');
+        <table style="width:100%;border-collapse:collapse">
+          <tbody>${fieldRows}</tbody>
+        </table>
+      </div>`;
+    }).join('');
 
-  out.innerHTML = cards || '<p style="color:var(--text-secondary);padding:24px">No field data available.</p>';
+    const zoneFieldCount = cxEntries.reduce((s, e) => s + e.flds.length, 0);
+    html += `<div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:3px solid ${color}">
+        <span style="display:inline-block;width:16px;height:16px;border-radius:4px;background:${color}"></span>
+        <h2 style="font-size:15px;font-weight:800;color:${color};margin:0">${label}</h2>
+        <span style="font-size:12px;color:var(--text-secondary)">${cxEntries.length} complex${cxEntries.length!==1?'es':''} · ${zoneFieldCount} field${zoneFieldCount!==1?'s':''}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+        ${cxCards}
+      </div>
+    </div>`;
+  }
+
+  out.innerHTML = html || '<p style="color:var(--text-secondary);padding:24px">No field data available.</p>';
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
